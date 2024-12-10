@@ -2,6 +2,7 @@ package com.ifortex.bookservice.repository.specification;
 
 import com.ifortex.bookservice.dto.SearchCriteria;
 import com.ifortex.bookservice.model.Book;
+import com.ifortex.bookservice.model.Member;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.jpa.domain.Specification;
@@ -27,7 +28,7 @@ public class SpecificationBuilderImpl implements SpecificationBuilder {
             }
 
             if (searchCriteria.getGenre() != null && !searchCriteria.getGenre().trim().isEmpty()) {
-                Join<Book, String> genres = root.join("genres");
+                Join<Book, String> genres = root.join("genre");
                 predicate = criteriaBuilder.and(predicate,
                         criteriaBuilder.equal(genres, searchCriteria.getGenre()));
             }
@@ -39,13 +40,35 @@ public class SpecificationBuilderImpl implements SpecificationBuilder {
 
             if (searchCriteria.getYear() != null && searchCriteria.getYear() > 0) {
                 predicate = criteriaBuilder.and(predicate,
-                        criteriaBuilder.equal(criteriaBuilder.function("year", Integer.class, root.get("publicationDate")), searchCriteria.getYear()));
+                        criteriaBuilder.equal(
+                                criteriaBuilder.function(
+                                        "date_part",
+                                        Integer.class,
+                                        criteriaBuilder.literal("year"),
+                                        root.get("publicationDate")),
+                                searchCriteria.getYear()
+                        ));
             }
 
             query.where(predicate);
             query.orderBy(criteriaBuilder.desc(root.get("publicationDate")));
 
             return predicate;
+        };
+    }
+
+    @Override
+    public Specification<Member> registeredInYearAndNoBooks(int year) {
+        return (root, query, criteriaBuilder) -> {
+
+            Predicate yearPredicate = criteriaBuilder.equal(
+                    criteriaBuilder.function("date_part", Integer.class,
+                            criteriaBuilder.literal("year"), root.get("membershipDate")),
+                    year);
+
+            Predicate noBooksPredicate = criteriaBuilder.isEmpty(root.get("borrowedBooks"));
+
+            return criteriaBuilder.and(yearPredicate, noBooksPredicate);
         };
     }
 }
