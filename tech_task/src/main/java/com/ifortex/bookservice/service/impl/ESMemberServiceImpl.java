@@ -25,6 +25,7 @@ public class ESMemberServiceImpl implements MemberService {
 
     @Override
     public Member findMember() {
+
         CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
         CriteriaQuery<Member> criteriaQuery = criteriaBuilder.createQuery(Member.class);
         Root<Member> root = criteriaQuery.from(Member.class);

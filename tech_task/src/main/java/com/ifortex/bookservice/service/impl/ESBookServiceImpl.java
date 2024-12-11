@@ -26,6 +26,7 @@ public class ESBookServiceImpl implements BookService {
 
     @Override
     public Map<String, Long> getBooks() {
+
         CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
         CriteriaQuery<Book> criteriaQuery = criteriaBuilder.createQuery(Book.class);
         Root<Book> root = criteriaQuery.from(Book.class);
