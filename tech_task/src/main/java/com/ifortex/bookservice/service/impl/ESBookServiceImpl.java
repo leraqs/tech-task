@@ -23,10 +23,12 @@ public class ESBookServiceImpl implements BookService {
     @Override
     public Map<String, Long> getBooks() {
         String sql = """
-                    SELECT UNNEST(genre) AS genre, COUNT(*) AS count
-                    FROM books
-                    GROUP BY genre
-                    ORDER BY count DESC
+                   SELECT genre_element AS genre,
+                          COUNT(*)      AS total_books
+                   FROM books,
+                        UNNEST(genre) AS genre_element
+                   GROUP BY genre_element
+                   ORDER BY total_books DESC;
                 """;
 
         List<Object[]> results = entityManager.createNativeQuery(sql).getResultList();
