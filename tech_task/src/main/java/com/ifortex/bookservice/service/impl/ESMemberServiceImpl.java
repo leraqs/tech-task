@@ -2,29 +2,35 @@ package com.ifortex.bookservice.service.impl;
 
 import com.ifortex.bookservice.model.Book;
 import com.ifortex.bookservice.model.Member;
-import com.ifortex.bookservice.repository.MemberRepository;
-import com.ifortex.bookservice.repository.specification.SpecificationBuilder;
 import com.ifortex.bookservice.service.MemberService;
-import lombok.RequiredArgsConstructor;
-import org.springframework.data.jpa.domain.Specification;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
 
 @Service
-@RequiredArgsConstructor
 public class ESMemberServiceImpl implements MemberService {
 
     private static final int REGISTRATION_YEAR = 2023;
     private static final String GENRE = "Romance";
-    private final MemberRepository memberRepository;
-    private final SpecificationBuilder specificationBuilder;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Override
     public Member findMember() {
+        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
+        CriteriaQuery<Member> criteriaQuery = criteriaBuilder.createQuery(Member.class);
+        Root<Member> root = criteriaQuery.from(Member.class);
+        criteriaQuery.select(root);
 
-        List<Member> members = memberRepository.findAll();
+        List<Member> members = entityManager.createQuery(criteriaQuery).getResultList();
 
         return members.stream()
                 .filter(member -> member.getBorrowedBooks().stream()
@@ -41,8 +47,19 @@ public class ESMemberServiceImpl implements MemberService {
     @Override
     public List<Member> findMembers() {
 
-        Specification<Member> spec = specificationBuilder.registeredInYearAndNoBooks(REGISTRATION_YEAR);
+        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
+        CriteriaQuery<Member> criteriaQuery = criteriaBuilder.createQuery(Member.class);
+        Root<Member> root = criteriaQuery.from(Member.class);
 
-        return memberRepository.findAll(spec);
+        Predicate yearPredicate = criteriaBuilder.equal(
+                criteriaBuilder.function("date_part", Integer.class,
+                        criteriaBuilder.literal("year"), root.get("membershipDate")),
+                REGISTRATION_YEAR);
+
+        Predicate noBooksPredicate = criteriaBuilder.isEmpty(root.get("borrowedBooks"));
+
+        criteriaQuery.where(criteriaBuilder.and(yearPredicate, noBooksPredicate));
+
+        return entityManager.createQuery(criteriaQuery).getResultList();
     }
 }
