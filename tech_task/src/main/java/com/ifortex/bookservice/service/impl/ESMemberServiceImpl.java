@@ -1,17 +1,12 @@
 package com.ifortex.bookservice.service.impl;
 
-import com.ifortex.bookservice.model.Book;
 import com.ifortex.bookservice.model.Member;
 import com.ifortex.bookservice.service.MemberService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
+import lombok.SneakyThrows;
 import org.springframework.stereotype.Service;
 
-import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -23,44 +18,54 @@ public class ESMemberServiceImpl implements MemberService {
     @PersistenceContext
     private EntityManager entityManager;
 
+    @SneakyThrows
     @Override
     public Member findMember() {
+        String sql = """
+                    SELECT m.*
+                    FROM members m
+                    JOIN member_books mb ON m.id = mb.member_id
+                    JOIN books b ON mb.book_id = b.id
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM books b2
+                        JOIN member_books mb2 ON mb2.book_id = b2.id
+                        WHERE mb2.member_id = m.id
+                        AND :genre = ANY (b2.genre)
+                    )
+                    ORDER BY (
+                        SELECT MIN(b3.publication_date)
+                        FROM books b3
+                        JOIN member_books mb3 ON mb3.book_id = b3.id
+                        WHERE mb3.member_id = m.id
+                        AND :genre = ANY (b3.genre)
+                    ) ASC
+                    LIMIT 1
+                """;
 
-        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
-        CriteriaQuery<Member> criteriaQuery = criteriaBuilder.createQuery(Member.class);
-        Root<Member> root = criteriaQuery.from(Member.class);
-        criteriaQuery.select(root);
-
-        List<Member> members = entityManager.createQuery(criteriaQuery).getResultList();
-
-        return members.stream()
-                .filter(member -> member.getBorrowedBooks().stream()
-                        .anyMatch(book -> book.getGenres().contains(GENRE)))
-                .max(Comparator.comparing(member ->
-                        member.getBorrowedBooks().stream()
-                                .filter(book -> book.getGenres().contains(GENRE))
-                                .min(Comparator.comparing(Book::getPublicationDate))
-                                .get()
-                                .getPublicationDate()))
+        return (Member) entityManager.createNativeQuery(sql, Member.class)
+                .setParameter("genre", GENRE)
+                .getResultStream()
+                .findFirst()
                 .orElseThrow(() -> new RuntimeException("No member found"));
     }
 
     @Override
     public List<Member> findMembers() {
+        String sql = """
+                    SELECT m.*
+                    FROM members m
+                    WHERE EXTRACT(YEAR FROM m.membership_date) = :year
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM member_books mb
+                        WHERE mb.member_id = m.id
+                    )
+                """;
 
-        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
-        CriteriaQuery<Member> criteriaQuery = criteriaBuilder.createQuery(Member.class);
-        Root<Member> root = criteriaQuery.from(Member.class);
-
-        Predicate yearPredicate = criteriaBuilder.equal(
-                criteriaBuilder.function("date_part", Integer.class,
-                        criteriaBuilder.literal("year"), root.get("membershipDate")),
-                REGISTRATION_YEAR);
-
-        Predicate noBooksPredicate = criteriaBuilder.isEmpty(root.get("borrowedBooks"));
-
-        criteriaQuery.where(criteriaBuilder.and(yearPredicate, noBooksPredicate));
-
-        return entityManager.createQuery(criteriaQuery).getResultList();
+        return entityManager.createNativeQuery(sql, Member.class)
+                .setParameter("year", REGISTRATION_YEAR)
+                .getResultList();
     }
 }
+

@@ -5,18 +5,14 @@ import com.ifortex.bookservice.model.Book;
 import com.ifortex.bookservice.service.BookService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import jakarta.persistence.criteria.CriteriaBuilder;
-import jakarta.persistence.criteria.CriteriaQuery;
-import jakarta.persistence.criteria.Join;
-import jakarta.persistence.criteria.Predicate;
-import jakarta.persistence.criteria.Root;
+import jakarta.persistence.Query;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @Service
 public class ESBookServiceImpl implements BookService {
@@ -26,73 +22,70 @@ public class ESBookServiceImpl implements BookService {
 
     @Override
     public Map<String, Long> getBooks() {
+        String sql = """
+                    SELECT UNNEST(genre) AS genre, COUNT(*) AS count
+                    FROM books
+                    GROUP BY genre
+                    ORDER BY count DESC
+                """;
 
-        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
-        CriteriaQuery<Book> criteriaQuery = criteriaBuilder.createQuery(Book.class);
-        Root<Book> root = criteriaQuery.from(Book.class);
-        criteriaQuery.select(root);
+        List<Object[]> results = entityManager.createNativeQuery(sql).getResultList();
 
-        List<Book> books = entityManager.createQuery(criteriaQuery).getResultList();
-
-        Map<String, Long> genreCount = new HashMap<>();
-        for (Book book : books) {
-            for (String genre : book.getGenres()) {
-                genreCount.put(genre, genreCount.getOrDefault(genre, 0L) + 1);
-            }
+        Map<String, Long> genreCount = new LinkedHashMap<>();
+        for (Object[] result : results) {
+            String genre = (String) result[0];
+            Long count = ((Number) result[1]).longValue();
+            genreCount.put(genre, count);
         }
 
-        return genreCount.entrySet()
-                .stream()
-                .sorted((entry1, entry2) -> Long.compare(entry2.getValue(), entry1.getValue()))
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
-                        (e1, e2) -> e1, LinkedHashMap::new));
+        return genreCount;
     }
 
     @Override
     public List<Book> getAllByCriteria(SearchCriteria searchCriteria) {
 
-        CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
-        CriteriaQuery<Book> query = criteriaBuilder.createQuery(Book.class);
-        Root<Book> root = query.from(Book.class);
+        String baseSql = """
+                SELECT *
+                FROM books
+                WHERE 1=1
+                """;
 
-        Predicate predicate = criteriaBuilder.conjunction();
+        List<String> conditions = new ArrayList<>();
+        Map<String, Object> parameters = new HashMap<>();
 
         if (searchCriteria.getTitle() != null && !searchCriteria.getTitle().trim().isEmpty()) {
-            predicate = criteriaBuilder.and(predicate,
-                    criteriaBuilder.like(root.get("title"), "%" + searchCriteria.getTitle() + "%"));
+            conditions.add("title ILIKE :title");
+            parameters.put("title", "%" + searchCriteria.getTitle() + "%");
         }
 
         if (searchCriteria.getAuthor() != null && !searchCriteria.getAuthor().trim().isEmpty()) {
-            predicate = criteriaBuilder.and(predicate,
-                    criteriaBuilder.like(root.get("author"), "%" + searchCriteria.getAuthor() + "%"));
+            conditions.add("author ILIKE :author");
+            parameters.put("author", "%" + searchCriteria.getAuthor() + "%");
         }
 
         if (searchCriteria.getGenre() != null && !searchCriteria.getGenre().trim().isEmpty()) {
-            Join<Book, String> genres = root.join("genre");
-            predicate = criteriaBuilder.and(predicate,
-                    criteriaBuilder.equal(genres, searchCriteria.getGenre()));
+            conditions.add(":genre = ANY (genre)");
+            parameters.put("genre", searchCriteria.getGenre());
         }
 
         if (searchCriteria.getDescription() != null && !searchCriteria.getDescription().trim().isEmpty()) {
-            predicate = criteriaBuilder.and(predicate,
-                    criteriaBuilder.like(root.get("description"), "%" + searchCriteria.getDescription() + "%"));
+            conditions.add("description ILIKE :description");
+            parameters.put("description", "%" + searchCriteria.getDescription() + "%");
         }
 
         if (searchCriteria.getYear() != null && searchCriteria.getYear() > 0) {
-            predicate = criteriaBuilder.and(predicate,
-                    criteriaBuilder.equal(
-                            criteriaBuilder.function(
-                                    "date_part",
-                                    Integer.class,
-                                    criteriaBuilder.literal("year"),
-                                    root.get("publicationDate")),
-                            searchCriteria.getYear()
-                    ));
+            conditions.add("EXTRACT(YEAR FROM publication_date) = :year");
+            parameters.put("year", searchCriteria.getYear());
         }
 
-        query.where(predicate);
-        query.orderBy(criteriaBuilder.desc(root.get("publicationDate")));
+        String sql = baseSql + (conditions.isEmpty() ? "" : " AND " + String.join(" AND ", conditions)) +
+                " ORDER BY publication_date DESC";
 
-        return entityManager.createQuery(query).getResultList();
+        Query query = entityManager.createNativeQuery(sql, Book.class);
+        parameters.forEach(query::setParameter);
+
+        return query.getResultList();
     }
+
 }
+
